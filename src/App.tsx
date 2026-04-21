@@ -7,6 +7,7 @@ import type { SelectedShip } from './components/ShipPanel'
 import { SHIP_DEFS } from './store/ships'
 import type { ShipType } from './store/ships'
 import type { GameSession } from './store/game'
+import { supabase } from './lib/supabase'
 
 const SHOT_TIME = 30
 
@@ -84,10 +85,9 @@ function generateRandomBoard(): CellState[][] {
   }
 }
 
-// Kołowy timer SVG
 function ShotTimer({ timeLeft }: { timeLeft: number }) {
-  const R    = 26
-  const circ = 2 * Math.PI * R
+  const R      = 26
+  const circ   = 2 * Math.PI * R
   const offset = circ * (1 - timeLeft / SHOT_TIME)
   const color  = timeLeft <= 5  ? '#ef4444'
                : timeLeft <= 10 ? '#f59e0b'
@@ -96,9 +96,7 @@ function ShotTimer({ timeLeft }: { timeLeft: number }) {
   return (
     <div className="flex items-center gap-3">
       <svg width="60" height="60" viewBox="0 0 60 60">
-        {/* tor */}
         <circle cx="30" cy="30" r={R} fill="none" stroke="#374151" strokeWidth="5" />
-        {/* postęp */}
         <circle
           cx="30" cy="30" r={R}
           fill="none"
@@ -110,14 +108,8 @@ function ShotTimer({ timeLeft }: { timeLeft: number }) {
           transform="rotate(-90 30 30)"
           style={{ transition: 'stroke-dashoffset 0.85s linear, stroke 0.3s' }}
         />
-        <text
-          x="30" y="36"
-          textAnchor="middle"
-          fontSize="18"
-          fontWeight="bold"
-          fill={color}
-          style={{ transition: 'fill 0.3s' }}
-        >
+        <text x="30" y="36" textAnchor="middle" fontSize="18" fontWeight="bold"
+          fill={color} style={{ transition: 'fill 0.3s' }}>
           {timeLeft}
         </text>
       </svg>
@@ -130,7 +122,7 @@ function ShotTimer({ timeLeft }: { timeLeft: number }) {
 }
 
 export default function App() {
-  const [screen, setScreen]           = useState<'lobby' | 'placement'>('lobby')
+  const [screen, setScreen]           = useState<'lobby' | 'placement' | 'game'>('lobby')
   const [session, setSession]         = useState<GameSession | null>(null)
 
   const [board, setBoard]             = useState<CellState[][]>(emptyBoard)
@@ -140,29 +132,54 @@ export default function App() {
   const [orientation, setOrientation] = useState<'h' | 'v'>('h')
   const [hoverCell, setHoverCell]     = useState<{ row: number; col: number } | null>(null)
   const [stunTurns, setStunTurns]     = useState(0)
-  const [isReady, setIsReady]         = useState(false)
+  const [myBoardReady, setMyBoardReady] = useState(false)
 
   const [paused, setPaused]           = useState(false)
   const [shotTimeLeft, setShotTimeLeft] = useState(SHOT_TIME)
   const [surrenderConfirm, setSurrenderConfirm] = useState(false)
 
-  // Odliczanie czasu na strzał – zatrzymuje się na pauzie i podczas ogłuszenia
+  const gameActive = screen === 'game'
+  const gameId     = session?.gameId
+
+  // Realtime: nasłuchuj zmiany statusu gry → 'active' gdy obaj gracze gotowi
   useEffect(() => {
-    if (!isReady || paused || stunTurns > 0) return
+    if (!gameId) return
+
+    const channel = supabase
+      .channel(`status-${gameId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` },
+        (payload) => {
+          const updated = payload.new as { status: string }
+          if (updated.status === 'active') {
+            setScreen('game')
+            setShotTimeLeft(SHOT_TIME)
+          }
+        },
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [gameId])
+
+  // Odliczanie czasu na strzał
+  useEffect(() => {
+    if (!gameActive || paused || stunTurns > 0) return
     const id = setInterval(() => {
       setShotTimeLeft(t => (t <= 1 ? SHOT_TIME : t - 1))
     }, 1000)
     return () => clearInterval(id)
-  }, [isReady, paused, stunTurns])
+  }, [gameActive, paused, stunTurns])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'r' || e.key === 'R') setOrientation(o => o === 'h' ? 'v' : 'h')
-      if (e.key === 'Escape' && isReady) setPaused(p => !p)
+      if (e.key === 'Escape' && gameActive) setPaused(p => !p)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isReady])
+  }, [gameActive])
 
   function handleGameReady(s: GameSession) {
     setSession(s)
@@ -171,7 +188,7 @@ export default function App() {
     setSelected(null)
     setHoverCell(null)
     setStunTurns(0)
-    setIsReady(false)
+    setMyBoardReady(false)
     setPaused(false)
     setShotTimeLeft(SHOT_TIME)
     setSurrenderConfirm(false)
@@ -189,30 +206,60 @@ export default function App() {
   const validPreview = previewCells.length > 0 && isValidPlacement(previewCells, board)
 
   function handleRandomize() {
+    if (myBoardReady) return
     setBoard(generateRandomBoard())
     setRemaining(emptyRemaining())
     setSelected(null)
     setHoverCell(null)
-    setIsReady(false)
   }
 
-  function handleReady() {
+  async function handleReady() {
+    if (!session || myBoardReady) return
     setSelected(null)
-    setShotTimeLeft(SHOT_TIME)
-    setIsReady(true)
+    setMyBoardReady(true)
+
+    // Zapisz planszę do bazy
+    const { error } = await supabase
+      .from('boards')
+      .insert({
+        game_id:   session.gameId,
+        player_id: session.playerId,
+        cells:     board.flat(),
+        is_ready:  true,
+      })
+
+    if (error) {
+      console.error('Błąd zapisu planszy:', error)
+      setMyBoardReady(false)
+      return
+    }
+
+    // Sprawdź czy obaj gracze zapisali plansze → jeśli tak, wystartuj grę
+    const { data: boards } = await supabase
+      .from('boards')
+      .select('is_ready')
+      .eq('game_id', session.gameId)
+
+    if (boards?.length === 2 && boards.every(b => b.is_ready)) {
+      await supabase
+        .from('games')
+        .update({ status: 'active' })
+        .eq('id', session.gameId)
+      // Realtime wywoła setScreen('game') u obu graczy
+    }
   }
 
   function handleSurrender() {
     setSurrenderConfirm(false)
+    setSession(null)   // czyści subskrypcję Realtime przez useEffect
     setScreen('lobby')
-    setSession(null)
     setBoard(emptyBoard())
     setRemaining(initialRemaining())
     setSelected(null)
     setStunTurns(0)
+    setMyBoardReady(false)
     setPaused(false)
     setShotTimeLeft(SHOT_TIME)
-    setIsReady(false)
   }
 
   function triggerAnim(key: string) {
@@ -244,7 +291,8 @@ export default function App() {
       return
     }
 
-    // gra wstrzymana
+    // strzały tylko w aktywnej grze
+    if (!gameActive) return
     if (paused) return
 
     // ogłuszenie po minie
@@ -257,8 +305,8 @@ export default function App() {
     // normalny strzał
     setBoard(prev => {
       const next = prev.map(r => [...r])
-      const cur = next[row][col]
-      const key = `${row}-${col}`
+      const cur  = next[row][col]
+      const key  = `${row}-${col}`
 
       if (cur === 'empty') {
         next[row][col] = 'miss'
@@ -292,7 +340,7 @@ export default function App() {
         )}
       </div>
 
-      {/* Baner miny */}
+      {/* Baner ogłuszenia */}
       {stunTurns > 0 && (
         <div className="bg-amber-900/80 border border-amber-500 text-amber-200 rounded-xl px-6 py-3 text-sm font-semibold flex items-center gap-3">
           <span className="text-xl">💣</span>
@@ -303,9 +351,11 @@ export default function App() {
 
       <div className="flex gap-10 items-start">
 
-        {/* Plansza z timerem i nakładką pauzy */}
+        {/* Kolumna planszy */}
         <div className="flex flex-col gap-3">
-          {isReady && (
+
+          {/* Timer – widoczny tylko podczas aktywnej gry */}
+          {gameActive && (
             <div className="flex items-center justify-between px-1">
               <ShotTimer timeLeft={shotTimeLeft} />
               {paused && (
@@ -327,6 +377,18 @@ export default function App() {
               isValidPreview={validPreview}
             />
 
+            {/* Nakładka: oczekiwanie na przeciwnika po kliknięciu GOTOWY */}
+            {myBoardReady && !gameActive && (
+              <div className="absolute inset-0 bg-gray-950/80 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 rounded-sm">
+                <svg className="animate-spin h-8 w-8 text-blue-400" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                </svg>
+                <p className="text-white font-bold text-sm">Plansza zatwierdzona ✓</p>
+                <p className="text-gray-400 text-xs">Oczekiwanie na przeciwnika…</p>
+              </div>
+            )}
+
             {/* Nakładka pauzy */}
             {paused && (
               <div className="absolute inset-0 bg-gray-950/75 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 rounded-sm">
@@ -342,7 +404,8 @@ export default function App() {
           remaining={remaining}
           selected={selected}
           orientation={orientation}
-          isReady={isReady}
+          gameActive={gameActive}
+          myBoardReady={myBoardReady}
           paused={paused}
           onSelect={setSelected}
           onToggleOrientation={() => setOrientation(o => o === 'h' ? 'v' : 'h')}
