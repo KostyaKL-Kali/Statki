@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Board } from './Board'
+import { Chat } from './Chat'
 import type { CellState } from './Board'
 import type { GameSession } from '../store/game'
 
@@ -40,16 +41,20 @@ interface Props {
   paused: boolean
   shotTimeLeft: number
   loading: boolean
+  winner: 'me' | 'opponent' | null
+  isAIMode: boolean
   onShot: (row: number, col: number) => void
   onPause: () => void
   onSurrender: () => void
+  onPlayAgain: () => void
 }
 
 export function GameScreen({
   session, myBoardView, oppBoardView,
   myAnimating, oppAnimating,
   isMyTurn, paused, shotTimeLeft, loading,
-  onShot, onPause, onSurrender,
+  winner, isAIMode,
+  onShot, onPause, onSurrender, onPlayAgain,
 }: Props) {
   const [confirmSurrender, setConfirmSurrender] = useState(false)
 
@@ -58,7 +63,7 @@ export function GameScreen({
 
       {/* Nagłówek */}
       <div className="flex items-center gap-4">
-        <h1 className="text-xl font-bold text-white tracking-wide">Statki – Multiplayer</h1>
+        <h1 className="text-xl font-bold text-white tracking-wide">Statki – {isAIMode ? 'vs Komputer' : 'Multiplayer'}</h1>
         <span className="text-xs px-3 py-1 rounded-full bg-gray-800 text-gray-400 font-mono">
           {session.nickname} · {session.role === 'player1' ? 'Gracz 1' : 'Gracz 2'}
         </span>
@@ -81,7 +86,7 @@ export function GameScreen({
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
             </svg>
-            <span>⏳ Tura przeciwnika…</span>
+            <span>{isAIMode ? '🤖 Komputer myśli…' : '⏳ Tura przeciwnika…'}</span>
           </>
         )}
         {paused && (
@@ -126,14 +131,14 @@ export function GameScreen({
               disabled={!isMyTurn || paused || loading}
             />
 
-            {/* Nakładka: tura przeciwnika */}
             {!isMyTurn && !paused && (
               <div className="absolute inset-0 bg-gray-950/60 flex items-center justify-center rounded-sm">
-                <span className="text-gray-400 text-sm font-semibold">Tura przeciwnika…</span>
+                <span className="text-gray-400 text-sm font-semibold">
+                  {isAIMode ? 'Komputer myśli…' : 'Tura przeciwnika…'}
+                </span>
               </div>
             )}
 
-            {/* Nakładka pauzy */}
             {paused && (
               <div className="absolute inset-0 bg-gray-950/80 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 rounded-sm">
                 <span className="text-4xl">⏸</span>
@@ -142,7 +147,6 @@ export function GameScreen({
               </div>
             )}
 
-            {/* Nakładka ładowania danych */}
             {loading && (
               <div className="absolute inset-0 bg-gray-950/80 flex flex-col items-center justify-center gap-3 rounded-sm">
                 <svg className="animate-spin h-8 w-8 text-blue-400" viewBox="0 0 24 24" fill="none">
@@ -156,24 +160,33 @@ export function GameScreen({
         </div>
 
         {/* Panel boczny */}
-        <div className="bg-gray-900 rounded-xl p-4 flex flex-col gap-3 self-start ml-2 w-44">
-          <button
-            onClick={onPause}
-            className={`text-sm font-bold rounded-lg px-3 py-2.5 transition-colors w-full ${
-              paused
-                ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                : 'bg-gray-700 hover:bg-gray-600 text-white'
-            }`}
-          >
-            {paused ? '▶ WZNÓW' : '⏸ PAUZA'}
-          </button>
+        <div className="flex flex-col gap-3 self-start ml-2">
+          <div className="bg-gray-900 rounded-xl p-4 flex flex-col gap-3 w-44">
+            {!isAIMode && (
+              <button
+                onClick={onPause}
+                className={`text-sm font-bold rounded-lg px-3 py-2.5 transition-colors w-full ${
+                  paused
+                    ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                    : 'bg-gray-700 hover:bg-gray-600 text-white'
+                }`}
+              >
+                {paused ? '▶ WZNÓW' : '⏸ PAUZA'}
+              </button>
+            )}
 
-          <button
-            onClick={() => setConfirmSurrender(true)}
-            className="bg-red-900 hover:bg-red-700 text-red-200 text-sm font-bold rounded-lg px-3 py-2.5 transition-colors w-full"
-          >
-            🏳 PODDAJĘ SIĘ
-          </button>
+            <button
+              onClick={() => setConfirmSurrender(true)}
+              className="bg-red-900 hover:bg-red-700 text-red-200 text-sm font-bold rounded-lg px-3 py-2.5 transition-colors w-full"
+            >
+              🏳 PODDAJĘ SIĘ
+            </button>
+          </div>
+
+          {/* Czat (tylko multiplayer) */}
+          {!isAIMode && (
+            <Chat gameId={session.gameId} nickname={session.nickname} />
+          )}
         </div>
       </div>
 
@@ -206,6 +219,29 @@ export function GameScreen({
                 Poddaję się
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ekran końca gry */}
+      {winner && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-12 flex flex-col gap-6 items-center shadow-2xl">
+            <div className="text-7xl">{winner === 'me' ? '🏆' : '💀'}</div>
+            <div className="flex flex-col items-center gap-1">
+              <p className={`font-bold text-3xl ${winner === 'me' ? 'text-yellow-400' : 'text-red-400'}`}>
+                {winner === 'me' ? 'Wygrałeś!' : 'Przegrałeś'}
+              </p>
+              <p className="text-gray-500 text-sm">
+                {winner === 'me' ? 'Wszystkie statki wroga zatopione.' : 'Twoja flota została zatopiona.'}
+              </p>
+            </div>
+            <button
+              onClick={onPlayAgain}
+              className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-lg px-10 py-3 rounded-xl transition-colors"
+            >
+              Wróć do lobby
+            </button>
           </div>
         </div>
       )}

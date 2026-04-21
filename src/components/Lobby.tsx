@@ -11,7 +11,6 @@ function getPlayerId(): string {
   return id
 }
 
-// Kod bez mylących znaków (0/O, 1/I/L)
 function makeRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
@@ -19,15 +18,17 @@ function makeRoomCode(): string {
 
 interface Props {
   onReady: (session: GameSession) => void
+  onAIReady: (nickname: string) => void
+  onLeaderboard: () => void
 }
 
-export function Lobby({ onReady }: Props) {
-  const [nickname, setNickname]   = useState(() => sessionStorage.getItem('nickname') ?? '')
-  const [joinCode, setJoinCode]   = useState('')
-  const [phase, setPhase]         = useState<'idle' | 'waiting'>('idle')
+export function Lobby({ onReady, onAIReady, onLeaderboard }: Props) {
+  const [nickname, setNickname]       = useState(() => sessionStorage.getItem('nickname') ?? '')
+  const [joinCode, setJoinCode]       = useState('')
+  const [phase, setPhase]             = useState<'idle' | 'waiting'>('idle')
   const [createdCode, setCreatedCode] = useState('')
-  const [error, setError]         = useState<string | null>(null)
-  const [loading, setLoading]     = useState(false)
+  const [error, setError]             = useState<string | null>(null)
+  const [loading, setLoading]         = useState(false)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   useEffect(() => {
@@ -52,7 +53,7 @@ export function Lobby({ onReady }: Props) {
 
     const { data, error: err } = await supabase
       .from('games')
-      .insert({ player1_id: playerId, room_code: roomCode, status: 'waiting' })
+      .insert({ player1_id: playerId, player1_nickname: nick, room_code: roomCode, status: 'waiting' })
       .select()
       .single()
 
@@ -62,7 +63,6 @@ export function Lobby({ onReady }: Props) {
     setCreatedCode(data.room_code)
     setPhase('waiting')
 
-    // Realtime: poczekaj aż player2 dołączy (status zmieni się na 'placement')
     const channel = supabase
       .channel(`lobby-${data.id}`)
       .on(
@@ -112,7 +112,7 @@ export function Lobby({ onReady }: Props) {
 
     const { data, error: joinErr } = await supabase
       .from('games')
-      .update({ player2_id: playerId, status: 'placement' })
+      .update({ player2_id: playerId, player2_nickname: nick, status: 'placement' })
       .eq('id', game.id)
       .select()
       .single()
@@ -123,11 +123,18 @@ export function Lobby({ onReady }: Props) {
     onReady({ gameId: data.id, playerId, nickname: nick, role: 'player2' })
   }
 
+  function handleAI() {
+    const nick = nickname.trim()
+    if (!nick) { setError('Podaj pseudonim'); return }
+    setError(null)
+    onAIReady(nick)
+  }
+
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-8 p-8">
       <div className="flex flex-col items-center gap-1">
         <h1 className="text-4xl font-bold text-white tracking-widest">STATKI</h1>
-        <p className="text-gray-500 text-sm">Gra dla dwóch graczy</p>
+        <p className="text-gray-500 text-sm">Gra wojenna na planszy 10×10</p>
       </div>
 
       <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 flex flex-col gap-6 w-80">
@@ -153,7 +160,6 @@ export function Lobby({ onReady }: Props) {
         )}
 
         {phase === 'waiting' ? (
-          /* Oczekiwanie po stworzeniu gry */
           <div className="flex flex-col items-center gap-4">
             <div className="bg-gray-800 border border-gray-700 rounded-xl px-8 py-5 flex flex-col items-center gap-2">
               <p className="text-gray-500 text-xs uppercase tracking-wider">Kod pokoju</p>
@@ -172,6 +178,21 @@ export function Lobby({ onReady }: Props) {
           </div>
         ) : (
           <>
+            {/* vs Komputer */}
+            <button
+              onClick={handleAI}
+              disabled={loading}
+              className="bg-green-700 hover:bg-green-600 active:bg-green-800 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl transition-colors tracking-wide"
+            >
+              🤖 GRA vs KOMPUTER
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-gray-800"/>
+              <span className="text-gray-600 text-xs">multiplayer</span>
+              <div className="flex-1 h-px bg-gray-800"/>
+            </div>
+
             {/* Stwórz grę */}
             <button
               onClick={handleCreate}
@@ -208,6 +229,14 @@ export function Lobby({ onReady }: Props) {
           </>
         )}
       </div>
+
+      {/* Tabela wyników */}
+      <button
+        onClick={onLeaderboard}
+        className="text-gray-600 hover:text-gray-400 text-sm transition-colors underline underline-offset-2"
+      >
+        Tabela wyników →
+      </button>
     </div>
   )
 }
