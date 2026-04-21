@@ -12,10 +12,13 @@ interface ShipPanelProps {
   selected: SelectedShip | null
   orientation: 'h' | 'v'
   isReady: boolean
+  paused: boolean
   onSelect: (ship: SelectedShip) => void
   onToggleOrientation: () => void
   onRandomize: () => void
   onReady: () => void
+  onPause: () => void
+  onSurrender: () => void
 }
 
 function ShipVisual({ size, type, active, depleted }: {
@@ -44,7 +47,11 @@ function ShipVisual({ size, type, active, depleted }: {
 const SHIPS = SHIP_DEFS.filter(d => d.type !== 'mine')
 const MINES = SHIP_DEFS.filter(d => d.type === 'mine')
 
-export function ShipPanel({ remaining, selected, orientation, isReady, onSelect, onToggleOrientation, onRandomize, onReady }: ShipPanelProps) {
+export function ShipPanel({
+  remaining, selected, orientation, isReady, paused,
+  onSelect, onToggleOrientation, onRandomize, onReady,
+  onPause, onSurrender,
+}: ShipPanelProps) {
   const allPlaced = SHIP_DEFS.every(def => remaining[def.type] === 0)
   const isMineSelected = selected?.type === 'mine'
 
@@ -57,11 +64,11 @@ export function ShipPanel({ remaining, selected, orientation, isReady, onSelect,
     return (
       <button
         key={def.type}
-        disabled={depleted}
-        onClick={() => onSelect({ type: def.type, name: def.name, size: def.size })}
+        disabled={depleted || isReady}
+        onClick={() => !isReady && onSelect({ type: def.type, name: def.name, size: def.size })}
         className={`flex items-center justify-between rounded-lg px-3 py-2 transition-colors text-left w-full ${
-          depleted
-            ? 'opacity-40 cursor-not-allowed bg-gray-800'
+          depleted || isReady
+            ? 'opacity-40 cursor-default bg-gray-800'
             : active
             ? isMine
               ? 'bg-amber-800 ring-2 ring-amber-400 cursor-pointer'
@@ -91,7 +98,8 @@ export function ShipPanel({ remaining, selected, orientation, isReady, onSelect,
         {MINES.map(renderItem)}
       </div>
 
-      {selected && !isMineSelected && (
+      {/* OBRÓĆ – tylko w fazie rozmieszczania */}
+      {!isReady && selected && !isMineSelected && (
         <div className="border-t border-gray-700 pt-3">
           <button
             onClick={onToggleOrientation}
@@ -105,26 +113,50 @@ export function ShipPanel({ remaining, selected, orientation, isReady, onSelect,
       )}
 
       <div className="border-t border-gray-700 pt-3 flex flex-col gap-2 mt-auto">
-        <button
-          onClick={onRandomize}
-          className="bg-gray-700 hover:bg-gray-600 text-white text-xs font-semibold rounded-lg px-3 py-2.5 transition-colors w-full"
-        >
-          🎲 LOSOWE ROZMIESZCZENIE
-        </button>
+        {isReady ? (
+          /* Kontrolki w trakcie gry */
+          <>
+            <button
+              onClick={onPause}
+              className={`text-sm font-bold rounded-lg px-3 py-2.5 transition-colors w-full ${
+                paused
+                  ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                  : 'bg-gray-700 hover:bg-gray-600 text-white'
+              }`}
+            >
+              {paused ? '▶ WZNÓW' : '⏸ PAUZA'}
+            </button>
 
-        <button
-          disabled={!allPlaced || isReady}
-          onClick={onReady}
-          className={`text-sm font-bold rounded-lg px-3 py-3 transition-colors w-full ${
-            isReady
-              ? 'bg-green-800 text-green-300 cursor-default'
-              : allPlaced
-              ? 'bg-green-600 hover:bg-green-500 text-white cursor-pointer'
-              : 'bg-gray-800 text-gray-600 cursor-not-allowed opacity-50'
-          }`}
-        >
-          {isReady ? '✓ Gotowy!' : 'GOTOWY'}
-        </button>
+            <button
+              onClick={onSurrender}
+              className="bg-red-900 hover:bg-red-700 text-red-200 text-sm font-bold rounded-lg px-3 py-2.5 transition-colors w-full"
+            >
+              🏳 PODDAJĘ SIĘ
+            </button>
+          </>
+        ) : (
+          /* Kontrolki w fazie rozmieszczania */
+          <>
+            <button
+              onClick={onRandomize}
+              className="bg-gray-700 hover:bg-gray-600 text-white text-xs font-semibold rounded-lg px-3 py-2.5 transition-colors w-full"
+            >
+              🎲 LOSOWE ROZMIESZCZENIE
+            </button>
+
+            <button
+              disabled={!allPlaced}
+              onClick={onReady}
+              className={`text-sm font-bold rounded-lg px-3 py-3 transition-colors w-full ${
+                allPlaced
+                  ? 'bg-green-600 hover:bg-green-500 text-white cursor-pointer'
+                  : 'bg-gray-800 text-gray-600 cursor-not-allowed opacity-50'
+              }`}
+            >
+              GOTOWY
+            </button>
+          </>
+        )}
       </div>
     </div>
   )
