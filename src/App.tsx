@@ -238,15 +238,13 @@ export default function App() {
             setShotTimeLeft(SHOT_TIME)
             setGameStartedAt(Date.now())
           }
-          if (updated.current_turn !== undefined) {
-            setCurrentTurn(updated.current_turn)
-            setShotTimeLeft(SHOT_TIME)
-          }
           if (updated.status === 'finished' && updated.winner_id) {
             const iWon = updated.winner_id === session?.playerId
             setWinner(iWon ? 'me' : 'opponent')
             if (!iWon) playLose()
-            // winner already played via handleShot
+          } else if (updated.current_turn !== undefined) {
+            setCurrentTurn(updated.current_turn)
+            setShotTimeLeft(SHOT_TIME)
           }
         },
       )
@@ -589,17 +587,7 @@ export default function App() {
       showSunk(`💥 ${getShipNameBySize(group.length)} zatopiony!`, 'attack')
     }
 
-    const playerHits = newShots.filter(s => s.shooter_id === session.playerId && (s.result === 'hit' || s.result === 'sunk')).length
-    if (playerHits >= TOTAL_SHIP_CELLS) {
-      setWinner('me')
-      setTimeout(playWin, 200)
-      await supabase.from('games').update({
-        status:    'finished',
-        winner_id: session.playerId,
-      }).eq('id', session.gameId)
-      return
-    }
-
+    // Zapisz strzał w bazie zawsze – także przy wygranej, żeby Realtime dotarł do obu graczy
     const { error: shotErr } = await supabase.from('shots').insert({
       game_id:    session.gameId,
       shooter_id: session.playerId,
@@ -609,6 +597,17 @@ export default function App() {
     if (shotErr) {
       setShots(prev => prev.filter(s => !(s.shooter_id === session.playerId && s.row === row && s.col === col)))
       console.error('Błąd zapisu strzału:', shotErr)
+      return
+    }
+
+    const playerHits = newShots.filter(s => s.shooter_id === session.playerId && (s.result === 'hit' || s.result === 'sunk')).length
+    if (playerHits >= TOTAL_SHIP_CELLS) {
+      setWinner('me')
+      setTimeout(playWin, 200)
+      await supabase.from('games').update({
+        status:    'finished',
+        winner_id: session.playerId,
+      }).eq('id', session.gameId)
       return
     }
 
