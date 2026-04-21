@@ -31,6 +31,12 @@ function ShotTimer({ timeLeft }: { timeLeft: number }) {
   )
 }
 
+function formatDuration(sec: number): string {
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
 interface Props {
   session: GameSession
   myBoardView: CellState[][]
@@ -42,6 +48,10 @@ interface Props {
   shotTimeLeft: number
   loading: boolean
   winner: 'me' | 'opponent' | null
+  gameStartedAt: number | null
+  myShots: number
+  totalShots: number
+  sunkNotif: { msg: string; type: 'attack' | 'defend' } | null
   isAIMode: boolean
   onShot: (row: number, col: number) => void
   onPause: () => void
@@ -53,13 +63,29 @@ export function GameScreen({
   session, myBoardView, oppBoardView,
   myAnimating, oppAnimating,
   isMyTurn, paused, shotTimeLeft, loading,
-  winner, isAIMode,
+  winner, gameStartedAt, myShots, totalShots,
+  sunkNotif, isAIMode,
   onShot, onPause, onSurrender, onPlayAgain,
 }: Props) {
   const [confirmSurrender, setConfirmSurrender] = useState(false)
 
+  const durationSec = winner && gameStartedAt
+    ? Math.floor((Date.now() - gameStartedAt) / 1000)
+    : null
+
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-5 p-6">
+
+      {/* Powiadomienie o zatopieniu */}
+      {sunkNotif && (
+        <div className={`fixed top-5 left-1/2 -translate-x-1/2 z-40 pointer-events-none
+          px-6 py-3 rounded-xl font-bold text-sm shadow-2xl border
+          ${sunkNotif.type === 'attack'
+            ? 'bg-orange-600 border-orange-400 text-white'
+            : 'bg-red-800 border-red-600 text-red-100'}`}>
+          {sunkNotif.msg}
+        </div>
+      )}
 
       {/* Nagłówek */}
       <div className="flex items-center gap-4">
@@ -131,7 +157,7 @@ export function GameScreen({
               disabled={!isMyTurn || paused || loading}
             />
 
-            {!isMyTurn && !paused && (
+            {!isMyTurn && !paused && !winner && (
               <div className="absolute inset-0 bg-gray-950/60 flex items-center justify-center rounded-sm">
                 <span className="text-gray-400 text-sm font-semibold">
                   {isAIMode ? 'Komputer myśli…' : 'Tura przeciwnika…'}
@@ -181,6 +207,15 @@ export function GameScreen({
             >
               🏳 PODDAJĘ SIĘ
             </button>
+
+            {/* Statystyki na żywo */}
+            <div className="border-t border-gray-800 pt-3 flex flex-col gap-1">
+              <p className="text-gray-600 text-[10px] uppercase tracking-wider">Strzały</p>
+              <p className="text-gray-300 text-sm font-mono font-semibold">
+                {myShots} / {totalShots}
+              </p>
+              <p className="text-gray-600 text-[10px]">moje / łączne</p>
+            </div>
           </div>
 
           {/* Czat (tylko multiplayer) */}
@@ -225,22 +260,54 @@ export function GameScreen({
 
       {/* Ekran końca gry */}
       {winner && (
-        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-12 flex flex-col gap-6 items-center shadow-2xl">
-            <div className="text-7xl">{winner === 'me' ? '🏆' : '💀'}</div>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className={`bg-gray-900 rounded-2xl p-10 flex flex-col gap-6 items-center shadow-2xl w-96 border ${
+            winner === 'me' ? 'border-yellow-600' : 'border-red-800'
+          }`}>
+
+            {/* Ikona i tytuł */}
+            <div className="text-8xl">{winner === 'me' ? '🏆' : '💀'}</div>
             <div className="flex flex-col items-center gap-1">
-              <p className={`font-bold text-3xl ${winner === 'me' ? 'text-yellow-400' : 'text-red-400'}`}>
-                {winner === 'me' ? 'Wygrałeś!' : 'Przegrałeś'}
+              <p className={`font-black text-4xl tracking-wide ${
+                winner === 'me' ? 'text-yellow-400' : 'text-red-400'
+              }`}>
+                {winner === 'me' ? 'WYGRAŁEŚ!' : 'PRZEGRAŁEŚ'}
               </p>
               <p className="text-gray-500 text-sm">
-                {winner === 'me' ? 'Wszystkie statki wroga zatopione.' : 'Twoja flota została zatopiona.'}
+                {winner === 'me'
+                  ? 'Wszystkie statki wroga zatopione.'
+                  : 'Twoja flota została zniszczona.'}
               </p>
             </div>
+
+            {/* Statystyki */}
+            <div className="w-full bg-gray-800 rounded-xl p-4 flex flex-col gap-3">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400 text-sm">Twoje strzały</span>
+                <span className="text-white font-bold font-mono text-lg">{myShots}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400 text-sm">Łączne strzały</span>
+                <span className="text-white font-bold font-mono text-lg">{totalShots}</span>
+              </div>
+              {durationSec !== null && (
+                <div className="flex justify-between items-center border-t border-gray-700 pt-3">
+                  <span className="text-gray-400 text-sm">Czas gry</span>
+                  <span className="text-white font-bold font-mono text-lg">{formatDuration(durationSec)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Przycisk */}
             <button
               onClick={onPlayAgain}
-              className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-lg px-10 py-3 rounded-xl transition-colors"
+              className={`w-full font-black text-xl py-4 rounded-xl transition-colors ${
+                winner === 'me'
+                  ? 'bg-yellow-500 hover:bg-yellow-400 text-gray-900'
+                  : 'bg-blue-600 hover:bg-blue-500 text-white'
+              }`}
             >
-              Wróć do lobby
+              NOWA GRA
             </button>
           </div>
         </div>

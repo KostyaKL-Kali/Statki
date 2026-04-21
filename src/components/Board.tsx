@@ -1,4 +1,4 @@
-export type CellState = 'empty' | 'ship' | 'hit' | 'miss' | 'mine' | 'exploded'
+export type CellState = 'empty' | 'ship' | 'hit' | 'miss' | 'mine' | 'exploded' | 'sunk'
 
 export const ROWS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
 export const COLS = Array.from({ length: 10 }, (_, i) => i + 1)
@@ -6,10 +6,11 @@ export const COLS = Array.from({ length: 10 }, (_, i) => i + 1)
 const CELL_CLASSES: Record<CellState, string> = {
   empty:    'w-[54px] h-[54px] border border-blue-900 cursor-pointer flex items-center justify-center text-base font-bold transition-colors bg-blue-500 hover:bg-blue-400',
   ship:     'w-[54px] h-[54px] border border-blue-900 cursor-pointer flex items-center justify-center text-base font-bold transition-colors bg-gray-500 hover:bg-gray-400',
-  hit:      'w-[54px] h-[54px] border border-blue-900 cursor-default flex items-center justify-center text-base font-bold transition-colors bg-red-500',
+  hit:      'w-[54px] h-[54px] border border-red-700 cursor-default flex items-center justify-center text-base font-bold transition-colors bg-red-500',
   miss:     'w-[54px] h-[54px] border border-blue-900 cursor-default flex items-center justify-center text-base font-bold transition-colors bg-white text-gray-400',
   mine:     'w-[54px] h-[54px] border border-amber-700 cursor-pointer flex items-center justify-center text-base font-bold transition-colors bg-amber-500 hover:bg-amber-400',
   exploded: 'w-[54px] h-[54px] border border-orange-900 cursor-default flex items-center justify-center text-base font-bold transition-colors bg-orange-700',
+  sunk:     'w-[54px] h-[54px] border border-red-950 cursor-default flex items-center justify-center text-base font-bold transition-colors bg-red-900',
 }
 
 const PREVIEW_VALID   = 'w-[54px] h-[54px] border-2 border-green-400 cursor-crosshair flex items-center justify-center text-base font-bold bg-green-400/40'
@@ -85,6 +86,7 @@ export function Board({
                 {state === 'miss'     && !isPreview && <span className="text-lg leading-none">×</span>}
                 {state === 'mine'     && !isPreview && <span className="text-lg leading-none">💣</span>}
                 {state === 'exploded' && !isPreview && <span className="text-lg leading-none">💥</span>}
+                {state === 'sunk'     && !isPreview && <span className="text-sm leading-none text-red-400">✕</span>}
               </div>
             )
           })}

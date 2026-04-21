@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Board } from './components/Board'
 import { ShipPanel } from './components/ShipPanel'
 import { Lobby } from './components/Lobby'
@@ -20,6 +20,11 @@ const SHOT_TIME = 30
 const TOTAL_SHIP_CELLS = SHIP_DEFS
   .filter(d => d.type !== 'mine')
   .reduce((s, d) => s + d.size * d.total, 0)
+
+function getShipNameBySize(size: number): string {
+  return SHIP_DEFS.find(d => d.size === size && d.type !== 'mine')?.name ?? `Statek (${size})`
+}
+
 
 // --------------- helpers ---------------
 
@@ -145,9 +150,23 @@ export default function App() {
   const [oppAnimating, setOppAnimating]           = useState<Set<string>>(new Set())
   const [gameLoading, setGameLoading]             = useState(false)
   const [winner, setWinner]                       = useState<'me' | 'opponent' | null>(null)
+  const [gameStartedAt, setGameStartedAt]         = useState<number | null>(null)
+  const [sunkNotif, setSunkNotif]                 = useState<{ msg: string; type: 'attack' | 'defend' } | null>(null)
 
   // AI
   const [aiTargetState, setAiTargetState] = useState<AITargetState | null>(null)
+
+  // Ref do planszy gracza – potrzebny w Realtime closures
+  const boardRef = useRef<CellState[][]>(emptyBoard())
+  useEffect(() => { boardRef.current = board }, [board])
+
+  // Auto-kasowanie powiadomienia o zatopieniu
+  const sunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function showSunk(msg: string, type: 'attack' | 'defend') {
+    if (sunkTimerRef.current) clearTimeout(sunkTimerRef.current)
+    setSunkNotif({ msg, type })
+    sunkTimerRef.current = setTimeout(() => setSunkNotif(null), 2800)
+  }
 
   // kontrolki
   const [paused, setPaused]             = useState(false)
@@ -162,27 +181,41 @@ export default function App() {
   const myBoardView = useMemo<CellState[][]>(() => {
     if (screen !== 'game') return board
     const view = board.map(row => [...row] as CellState[])
-    shots
-      .filter(s => s.shooter_id !== session?.playerId)
-      .forEach(({ row, col, result }) => {
-        if      (result === 'hit' || result === 'sunk') view[row][col] = 'hit'
-        else if (result === 'miss')                     view[row][col] = 'miss'
-        else if (result === 'mine')                     view[row][col] = 'exploded'
+    const oppShots = shots.filter(s => s.shooter_id !== session?.playerId)
+    oppShots.forEach(({ row, col, result }) => {
+      if      (result === 'hit' || result === 'sunk') view[row][col] = 'hit'
+      else if (result === 'miss')                     view[row][col] = 'miss'
+      else if (result === 'mine')                     view[row][col] = 'exploded'
+    })
+    // Oznacz wszystkie pola zatopionych statków
+    oppShots.filter(s => s.result === 'sunk').forEach(({ row, col }) => {
+      getShipGroup(board, row, col).forEach(key => {
+        const [r, c] = key.split('-').map(Number)
+        view[r][c] = 'sunk'
       })
+    })
     return view
   }, [board, shots, session?.playerId, screen])
 
   const oppBoardView = useMemo<CellState[][]>(() => {
     const view = emptyBoard()
-    shots
-      .filter(s => s.shooter_id === session?.playerId)
-      .forEach(({ row, col, result }) => {
-        if      (result === 'hit' || result === 'sunk') view[row][col] = 'hit'
-        else if (result === 'miss')                     view[row][col] = 'miss'
-        else if (result === 'mine')                     view[row][col] = 'exploded'
+    const myShots = shots.filter(s => s.shooter_id === session?.playerId)
+    myShots.forEach(({ row, col, result }) => {
+      if      (result === 'hit' || result === 'sunk') view[row][col] = 'hit'
+      else if (result === 'miss')                     view[row][col] = 'miss'
+      else if (result === 'mine')                     view[row][col] = 'exploded'
+    })
+    // Odsłoń wszystkie pola zatopionego statku (nagrodowy reveal)
+    if (opponentBoardFull) {
+      myShots.filter(s => s.result === 'sunk').forEach(({ row, col }) => {
+        getShipGroup(opponentBoardFull, row, col).forEach(key => {
+          const [r, c] = key.split('-').map(Number)
+          view[r][c] = 'sunk'
+        })
       })
+    }
     return view
-  }, [shots, session?.playerId])
+  }, [shots, session?.playerId, opponentBoardFull])
 
   // ---- Realtime: zmiany statusu gry i current_turn ----
   useEffect(() => {
@@ -203,6 +236,7 @@ export default function App() {
           if (updated.status === 'active') {
             setScreen('game')
             setShotTimeLeft(SHOT_TIME)
+            setGameStartedAt(Date.now())
           }
           if (updated.current_turn !== undefined) {
             setCurrentTurn(updated.current_turn)
@@ -244,7 +278,11 @@ export default function App() {
             if (shot.result === 'hit' || shot.result === 'sunk') playHit()
             else if (shot.result === 'miss') playMiss()
             else if (shot.result === 'mine') playMine()
-            if (shot.result === 'sunk') setTimeout(playSunk, 120)
+            if (shot.result === 'sunk') {
+              setTimeout(playSunk, 120)
+              const group = getShipGroup(boardRef.current, shot.row, shot.col)
+              showSunk(`⚠️ Twój ${getShipNameBySize(group.length)} zatopiony!`, 'defend')
+            }
 
             // Animacja na mojej planszy
             const key = `${shot.row}-${shot.col}`
@@ -289,13 +327,14 @@ export default function App() {
 
       const { data: game } = await supabase
         .from('games')
-        .select('current_turn, player1_id, player2_id')
+        .select('current_turn, player1_id, player2_id, updated_at')
         .eq('id', gId)
         .single()
 
       if (!cancelled && game) {
         setCurrentTurn(game.current_turn)
         setOpponentId(session!.role === 'player1' ? game.player2_id : game.player1_id)
+        if (game.updated_at) setGameStartedAt(new Date(game.updated_at).getTime())
       }
 
       const { data: history } = await supabase
@@ -346,6 +385,8 @@ export default function App() {
     setShotTimeLeft(SHOT_TIME)
     setWinner(null)
     setAiTargetState(null)
+    setGameStartedAt(null)
+    setSunkNotif(null)
   }
 
   // ---- Akcje ----
@@ -391,6 +432,7 @@ export default function App() {
       setCurrentTurn('player')
       setShotTimeLeft(SHOT_TIME)
       setAiTargetState(initAITargetState())
+      setGameStartedAt(Date.now())
       setScreen('game')
       return
     }
@@ -454,7 +496,11 @@ export default function App() {
     if (result === 'hit' || result === 'sunk') playHit()
     else if (result === 'miss') playMiss()
     else if (result === 'mine') playMine()
-    if (result === 'sunk') setTimeout(playSunk, 120)
+    if (result === 'sunk') {
+      setTimeout(playSunk, 120)
+      const group = getShipGroup(playerBoard, ar, ac_)
+      showSunk(`⚠️ Twój ${getShipNameBySize(group.length)} zatopiony!`, 'defend')
+    }
 
     const aiHits = newShots.filter(s => s.shooter_id === 'ai' && (s.result === 'hit' || s.result === 'sunk')).length
     if (aiHits >= TOTAL_SHIP_CELLS) {
@@ -493,7 +539,11 @@ export default function App() {
     if (result === 'hit' || result === 'sunk') playHit()
     else if (result === 'miss') playMiss()
     else if (result === 'mine') playMine()
-    if (result === 'sunk') setTimeout(playSunk, 120)
+    if (result === 'sunk') {
+      setTimeout(playSunk, 120)
+      const group = getShipGroup(opponentBoardFull!, row, col)
+      showSunk(`💥 ${getShipNameBySize(group.length)} zatopiony!`, 'attack')
+    }
 
     const playerHits = newShots.filter(s => s.shooter_id === 'player' && (s.result === 'hit' || s.result === 'sunk')).length
     if (playerHits >= TOTAL_SHIP_CELLS) {
@@ -533,7 +583,11 @@ export default function App() {
     if (result === 'hit' || result === 'sunk') playHit()
     else if (result === 'miss') playMiss()
     else if (result === 'mine') playMine()
-    if (result === 'sunk') setTimeout(playSunk, 120)
+    if (result === 'sunk') {
+      setTimeout(playSunk, 120)
+      const group = getShipGroup(opponentBoardFull, row, col)
+      showSunk(`💥 ${getShipNameBySize(group.length)} zatopiony!`, 'attack')
+    }
 
     const playerHits = newShots.filter(s => s.shooter_id === session.playerId && (s.result === 'hit' || s.result === 'sunk')).length
     if (playerHits >= TOTAL_SHIP_CELLS) {
@@ -621,6 +675,10 @@ export default function App() {
         shotTimeLeft={shotTimeLeft}
         loading={gameLoading}
         winner={winner}
+        gameStartedAt={gameStartedAt}
+        myShots={shots.filter(s => s.shooter_id === session?.playerId).length}
+        totalShots={shots.length}
+        sunkNotif={sunkNotif}
         isAIMode={gameMode === 'ai'}
         onShot={handleShot}
         onPause={() => setPaused(p => !p)}
