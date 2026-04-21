@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Board } from './components/Board'
 import { ShipPanel } from './components/ShipPanel'
 import type { CellState } from './components/Board'
 import type { SelectedShip } from './components/ShipPanel'
 import { SHIP_DEFS } from './store/ships'
 import type { ShipType } from './store/ships'
+import { supabase } from './lib/supabase'
 
 function calcCells(row: number, col: number, size: number, orientation: 'h' | 'v'): string[] {
   return Array.from({ length: size }, (_, i) => {
@@ -89,6 +90,9 @@ export default function App() {
   const [hoverCell, setHoverCell]   = useState<{ row: number; col: number } | null>(null)
   const [stunTurns, setStunTurns]   = useState(0)
   const [isReady, setIsReady]       = useState(false)
+  const [dbStatus, setDbStatus]     = useState<'checking' | 'ok' | 'error'>('checking')
+  const [gamesCount, setGamesCount] = useState<number | null>(null)
+  const tested = useRef(false)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -96,6 +100,20 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // test połączenia z Supabase
+  useEffect(() => {
+    if (tested.current) return
+    tested.current = true
+    supabase
+      .from('games')
+      .select('*', { count: 'exact', head: true })
+      .then(({ count, error }) => {
+        if (error) { setDbStatus('error'); return }
+        setDbStatus('ok')
+        setGamesCount(count ?? 0)
+      })
   }, [])
 
   const previewCells = selected && hoverCell
@@ -179,6 +197,16 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-6 p-8">
       <h1 className="text-2xl font-bold text-white tracking-wide">Statki – Multiplayer</h1>
+
+      <div className={`text-xs px-3 py-1 rounded-full font-mono ${
+        dbStatus === 'checking' ? 'bg-gray-800 text-gray-400' :
+        dbStatus === 'ok'       ? 'bg-green-900 text-green-400' :
+                                  'bg-red-900 text-red-400'
+      }`}>
+        {dbStatus === 'checking' && '⏳ Łączenie z Supabase…'}
+        {dbStatus === 'ok'       && `✓ Supabase OK · games: ${gamesCount}`}
+        {dbStatus === 'error'    && '✗ Błąd połączenia z Supabase'}
+      </div>
 
       {stunTurns > 0 && (
         <div className="bg-amber-900/80 border border-amber-500 text-amber-200 rounded-xl px-6 py-3 text-sm font-semibold flex items-center gap-3">
