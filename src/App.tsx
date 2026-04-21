@@ -309,7 +309,10 @@ export default function App() {
         .select('player_id, cells')
         .eq('game_id', gId)
 
-      if (cancelled || !boards) return
+      if (cancelled || !boards) {
+        if (!cancelled) setGameLoading(false)
+        return
+      }
 
       const myData  = boards.find(b => b.player_id === session!.playerId)
       const oppData = boards.find(b => b.player_id !== session!.playerId)
@@ -348,6 +351,27 @@ export default function App() {
     load()
     return () => { cancelled = true }
   }, [screen, gameMode, session?.gameId])
+
+  // ---- Polling fallback: gdy Realtime zgubi event 'active' ----
+  useEffect(() => {
+    if (!myBoardReady || screen !== 'placement' || gameMode === 'ai' || !session) return
+    const gId  = session.gameId
+    const role = session.role
+    const id = setInterval(async () => {
+      const { data } = await supabase
+        .from('games')
+        .select('status, current_turn, player1_id, player2_id')
+        .eq('id', gId)
+        .single()
+      if (data?.status === 'active') {
+        setCurrentTurn(data.current_turn)
+        setOpponentId(role === 'player1' ? data.player2_id : data.player1_id)
+        setGameStartedAt(Date.now())
+        setScreen('game')
+      }
+    }, 2500)
+    return () => clearInterval(id)
+  }, [myBoardReady, screen, gameMode, session?.gameId, session?.role])
 
   // ---- Timer ----
   useEffect(() => {
@@ -447,12 +471,18 @@ export default function App() {
 
     if (allBoards?.length === 2 && allBoards.every(b => b.is_ready)) {
       const { data: game } = await supabase
-        .from('games').select('player1_id').eq('id', session.gameId).single()
+        .from('games').select('player1_id, player2_id').eq('id', session.gameId).single()
 
       await supabase.from('games').update({
         status:       'active',
         current_turn: game?.player1_id,
       }).eq('id', session.gameId)
+
+      // Przejdź od razu do gry — nie czekaj na Realtime (może być zgubiony)
+      setCurrentTurn(game?.player1_id ?? null)
+      setOpponentId(session.role === 'player1' ? game?.player2_id ?? null : game?.player1_id ?? null)
+      setGameStartedAt(Date.now())
+      setScreen('game')
     }
   }
 
