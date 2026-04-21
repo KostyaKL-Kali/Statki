@@ -11,15 +11,11 @@ interface ShipPanelProps {
   remaining: Record<ShipType, number>
   selected: SelectedShip | null
   orientation: 'h' | 'v'
-  gameActive: boolean    // gra jest aktywna (obaj gracze gotowi)
-  myBoardReady: boolean  // kliknąłem GOTOWY, czekam na przeciwnika
-  paused: boolean
+  myBoardReady: boolean  // plansza wysłana do DB, czekamy na przeciwnika
   onSelect: (ship: SelectedShip) => void
   onToggleOrientation: () => void
   onRandomize: () => void
   onReady: () => void
-  onPause: () => void
-  onSurrender: () => void
 }
 
 function ShipVisual({ size, type, active, depleted }: {
@@ -49,11 +45,10 @@ const SHIPS = SHIP_DEFS.filter(d => d.type !== 'mine')
 const MINES = SHIP_DEFS.filter(d => d.type === 'mine')
 
 export function ShipPanel({
-  remaining, selected, orientation, gameActive, myBoardReady, paused,
-  onSelect, onToggleOrientation, onRandomize, onReady, onPause, onSurrender,
+  remaining, selected, orientation, myBoardReady,
+  onSelect, onToggleOrientation, onRandomize, onReady,
 }: ShipPanelProps) {
   const allPlaced = SHIP_DEFS.every(def => remaining[def.type] === 0)
-  const locked    = myBoardReady || gameActive
   const isMineSelected = selected?.type === 'mine'
 
   function renderItem(def: typeof SHIP_DEFS[0]) {
@@ -65,10 +60,10 @@ export function ShipPanel({
     return (
       <button
         key={def.type}
-        disabled={depleted || locked}
-        onClick={() => !locked && onSelect({ type: def.type, name: def.name, size: def.size })}
+        disabled={depleted || myBoardReady}
+        onClick={() => !myBoardReady && onSelect({ type: def.type, name: def.name, size: def.size })}
         className={`flex items-center justify-between rounded-lg px-3 py-2 transition-colors text-left w-full ${
-          depleted || locked
+          depleted || myBoardReady
             ? 'opacity-40 cursor-default bg-gray-800'
             : active
             ? isMine
@@ -99,8 +94,8 @@ export function ShipPanel({
         {MINES.map(renderItem)}
       </div>
 
-      {/* OBRÓĆ – tylko w fazie rozmieszczania, gdy statek wybrany */}
-      {!locked && selected && !isMineSelected && (
+      {/* OBRÓĆ – tylko gdy statek wybrany i plansza jeszcze nie wysłana */}
+      {!myBoardReady && selected && !isMineSelected && (
         <div className="border-t border-gray-700 pt-3">
           <button
             onClick={onToggleOrientation}
@@ -114,28 +109,7 @@ export function ShipPanel({
       )}
 
       <div className="border-t border-gray-700 pt-3 flex flex-col gap-2 mt-auto">
-        {gameActive ? (
-          /* Gra trwa – kontrolki */
-          <>
-            <button
-              onClick={onPause}
-              className={`text-sm font-bold rounded-lg px-3 py-2.5 transition-colors w-full ${
-                paused
-                  ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                  : 'bg-gray-700 hover:bg-gray-600 text-white'
-              }`}
-            >
-              {paused ? '▶ WZNÓW' : '⏸ PAUZA'}
-            </button>
-
-            <button
-              onClick={onSurrender}
-              className="bg-red-900 hover:bg-red-700 text-red-200 text-sm font-bold rounded-lg px-3 py-2.5 transition-colors w-full"
-            >
-              🏳 PODDAJĘ SIĘ
-            </button>
-          </>
-        ) : myBoardReady ? (
+        {myBoardReady ? (
           /* Plansza wysłana – czekamy na przeciwnika */
           <div className="flex flex-col items-center gap-2 py-2">
             <svg className="animate-spin h-5 w-5 text-blue-400" viewBox="0 0 24 24" fill="none">
@@ -146,7 +120,7 @@ export function ShipPanel({
             <p className="text-gray-500 text-xs text-center">Oczekiwanie na<br/>przeciwnika…</p>
           </div>
         ) : (
-          /* Rozmieszczanie – kontrolki */
+          /* Rozmieszczanie */
           <>
             <button
               onClick={onRandomize}

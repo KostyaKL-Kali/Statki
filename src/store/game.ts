@@ -5,6 +5,13 @@ export interface GameSession {
   role: 'player1' | 'player2'
 }
 
+export interface ShotRecord {
+  shooter_id: string
+  row: number
+  col: number
+  result: 'hit' | 'miss' | 'mine' | 'sunk'
+}
+
 export interface Game {
   id: string
   room_code: string
