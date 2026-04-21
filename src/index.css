@@ -1,1 +1,31 @@
 @import "tailwindcss";
+
+/* animacja pudła – plusk wody */
+@keyframes miss-splash {
+  0%   { transform: scale(1); filter: brightness(1); }
+  30%  { transform: scale(1.35); filter: brightness(1.6) saturate(1.8); }
+  60%  { transform: scale(0.92); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
+/* animacja trafienia – eksplozja */
+@keyframes hit-explode {
+  0%   { transform: scale(1)    rotate(0deg);   filter: brightness(1); }
+  15%  { transform: scale(1.55) rotate(-12deg); filter: brightness(2.8); }
+  35%  { transform: scale(0.78) rotate(9deg);   filter: brightness(1.6); }
+  55%  { transform: scale(1.25) rotate(-5deg);  filter: brightness(1.9); }
+  75%  { transform: scale(0.93) rotate(2deg);   filter: brightness(1.2); }
+  90%  { transform: scale(1.06); }
+  100% { transform: scale(1)    rotate(0deg);   filter: brightness(1); }
+}
+
+@theme {
+  --animate-miss: miss-splash 0.55s ease-out;
+  --animate-hit:  hit-explode 0.7s ease-out;
+}
+
+@layer base {
+  html, body, #root {
+    min-height: 100%;
+  }
+}
