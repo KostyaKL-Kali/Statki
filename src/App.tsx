@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { Board } from './components/Board'
 import { ShipPanel } from './components/ShipPanel'
+import { Lobby } from './components/Lobby'
 import type { CellState } from './components/Board'
 import type { SelectedShip } from './components/ShipPanel'
 import { SHIP_DEFS } from './store/ships'
 import type { ShipType } from './store/ships'
-import { supabase } from './lib/supabase'
+import type { GameSession } from './store/game'
 
 function calcCells(row: number, col: number, size: number, orientation: 'h' | 'v'): string[] {
   return Array.from({ length: size }, (_, i) => {
@@ -47,10 +48,12 @@ const initialRemaining = () =>
 const emptyRemaining = () =>
   Object.fromEntries(SHIP_DEFS.map(s => [s.type, 0])) as Record<ShipType, number>
 
+const emptyBoard = (): CellState[][] =>
+  Array.from({ length: 10 }, () => Array(10).fill('empty'))
+
 function generateRandomBoard(): CellState[][] {
-  // ponawia całość jeśli któryś statek nie zmieści się w 500 próbach
   while (true) {
-    const board: CellState[][] = Array.from({ length: 10 }, () => Array(10).fill('empty') as CellState[])
+    const board: CellState[][] = emptyBoard()
     let ok = true
 
     outer: for (const def of SHIP_DEFS) {
@@ -80,9 +83,10 @@ function generateRandomBoard(): CellState[][] {
 }
 
 export default function App() {
-  const [board, setBoard]           = useState<CellState[][]>(
-    () => Array.from({ length: 10 }, () => Array(10).fill('empty'))
-  )
+  const [screen, setScreen]         = useState<'lobby' | 'placement'>('lobby')
+  const [session, setSession]       = useState<GameSession | null>(null)
+
+  const [board, setBoard]           = useState<CellState[][]>(emptyBoard)
   const [animating, setAnimating]   = useState<Set<string>>(new Set())
   const [remaining, setRemaining]   = useState<Record<ShipType, number>>(initialRemaining)
   const [selected, setSelected]     = useState<SelectedShip | null>(null)
@@ -90,9 +94,6 @@ export default function App() {
   const [hoverCell, setHoverCell]   = useState<{ row: number; col: number } | null>(null)
   const [stunTurns, setStunTurns]   = useState(0)
   const [isReady, setIsReady]       = useState(false)
-  const [dbStatus, setDbStatus]     = useState<'checking' | 'ok' | 'error'>('checking')
-  const [gamesCount, setGamesCount] = useState<number | null>(null)
-  const tested = useRef(false)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -102,19 +103,20 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // test połączenia z Supabase
-  useEffect(() => {
-    if (tested.current) return
-    tested.current = true
-    supabase
-      .from('games')
-      .select('*', { count: 'exact', head: true })
-      .then(({ count, error }) => {
-        if (error) { setDbStatus('error'); return }
-        setDbStatus('ok')
-        setGamesCount(count ?? 0)
-      })
-  }, [])
+  function handleGameReady(s: GameSession) {
+    setSession(s)
+    setBoard(emptyBoard())
+    setRemaining(initialRemaining())
+    setSelected(null)
+    setHoverCell(null)
+    setStunTurns(0)
+    setIsReady(false)
+    setScreen('placement')
+  }
+
+  if (screen === 'lobby') {
+    return <Lobby onReady={handleGameReady} />
+  }
 
   const previewCells = selected && hoverCell
     ? calcCells(hoverCell.row, hoverCell.col, selected.size, orientation)
@@ -143,7 +145,6 @@ export default function App() {
   }
 
   function handleClick(row: number, col: number) {
-    // tryb rozstawiania
     if (selected) {
       const cells = calcCells(row, col, selected.size, orientation)
       if (!isValidPlacement(cells, board)) return
@@ -164,13 +165,11 @@ export default function App() {
       return
     }
 
-    // tryb gry – stun aktywny
     if (stunTurns > 0) {
       setStunTurns(t => t - 1)
       return
     }
 
-    // tryb gry – normalne kliknięcie
     setBoard(prev => {
       const next = prev.map(r => [...r])
       const cur = next[row][col]
@@ -196,16 +195,13 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-6 p-8">
-      <h1 className="text-2xl font-bold text-white tracking-wide">Statki – Multiplayer</h1>
-
-      <div className={`text-xs px-3 py-1 rounded-full font-mono ${
-        dbStatus === 'checking' ? 'bg-gray-800 text-gray-400' :
-        dbStatus === 'ok'       ? 'bg-green-900 text-green-400' :
-                                  'bg-red-900 text-red-400'
-      }`}>
-        {dbStatus === 'checking' && '⏳ Łączenie z Supabase…'}
-        {dbStatus === 'ok'       && `✓ Supabase OK · games: ${gamesCount}`}
-        {dbStatus === 'error'    && '✗ Błąd połączenia z Supabase'}
+      <div className="flex items-center gap-4">
+        <h1 className="text-2xl font-bold text-white tracking-wide">Statki – Multiplayer</h1>
+        {session && (
+          <span className="text-xs px-3 py-1 rounded-full bg-gray-800 text-gray-400 font-mono">
+            {session.nickname} · {session.role === 'player1' ? 'Gracz 1' : 'Gracz 2'}
+          </span>
+        )}
       </div>
 
       {stunTurns > 0 && (
